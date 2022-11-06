@@ -1,0 +1,420 @@
+---
+title: "troubleshooting_homegate_rental_site"
+output: html_document
+date: "2022-11-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Step 1: Load the libraries
+
+```{r}
+if (system.file(package = "pacman") == "") {
+  install.packages("pacman")
+}
+
+pacman::p_load(httr, rvest, polite, stringr)
+```
+
+
+# Step 1: Try out the scrap.homegate function and check the error message
+
+The `scrap.homegate` function fails whenever we try scrapping one of the individual rental listings on the websites. It manages to scrape the PLZ page that has all the listings `https://www.homegate.ch/mieten/immobilien/plz-9050/trefferliste?ep=1`, but whenever it goes to a single listing (e.g., `https://www.homegate.ch/mieten/3002180672`), it fails and returns a **403 Client error**
+
+```{r}
+# Try out the scrap.homegate function on "https://www.homegate.ch/mieten/3002180672"
+link <- "/mieten/3002180672"
+myurl <- paste("https://www.homegate.ch", link, sep="")
+
+names1<-c("Urs","Fabienne","Fabian","Daniel","Simon","Simona","Andrea","Andreas","Martina",
+          "Tobias","Ruedi","Max","Susanne","Lisa","Hans","Theres","Mia")
+names2<-c("Müller","Käch","Graf","Simic","DeCarli","Herrliger","Piselli","Egger","Schmucki",
+          "Schegg","Campi","Sonderegger")
+
+### Scraping eröffnen ###
+n1 <- sample(names1,size=1)         
+n2 <- sample(names2,size=1)        
+usera <- paste(n2,".",n1,"@",sample(c("hotmail.com","gmail.com","gmx.ch","bluewin.ch"),size=1),sep="")          
+
+mybow <- bow(myurl, user_agent=usera, force=TRUE, delay = 5.5)         
+mysession <- nod(bow=mybow, path=myurl)
+scraped_page <- scrape(mysession)
+```
+
+We get a **403 Client error**, which means that our request was blocked and we were **not** authorized to access the site's HTML content. The website detected that our request comes from a **bot** and **not an actual human being/browser** and prevented us from accessing the content. Let's use a normal GET request from the httr package to try to understand what's happening on the server's side
+
+# Step 2: Send a GET request to the same webpage that we tried to scrape above
+
+```{r}
+# Send a GET request
+res1 <- GET(myurl)
+
+# Now parse its content to see what it returns
+cat(content(res1, "text"))
+```
+
+If you look at the content of the response, you will see these messages:
+- **Checking if the site connection is secure**
+- **Enable JavaScript and cookies to continue**
+- **www.homegate.ch needs to review the security of your connection before proceeding**
+
+You will also see the website of Cloudflare `https://www.cloudflare.com?utm_source=challenge&utm_campaign=l` pop up at the end of the response. Cloudflare is a company that specializes in securing websites, APIs, and internet applications from DDOS attacks and bots. This explains why our request cannot access the website. Cloudflare is asking us to use **cookies** and **enable Javascript** to allow us to get access to the website. Before we try out a more complicated solution, let's see if passing custom headers in the GET request solves the issue.
+
+# Step 3: Send custom GET headers with the GET request
+
+If you go to `https://httpbin.org/headers` from your browser, you see the following output. These are the headers used by a GET request that originates from an **actual browser** that a human controls
+
+{
+  "headers": {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9", 
+    "Accept-Encoding": "gzip, deflate, br", 
+    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8,de;q=0.7", 
+    "Host": "httpbin.org", 
+    "Referer": "https://www.google.com/",
+    "Sec-Ch-Ua": "\"Google Chrome\";v=\"107\", \"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"", 
+    "Sec-Ch-Ua-Mobile": "?0", 
+    "Sec-Ch-Ua-Platform": "\"Windows\"", 
+    "Sec-Fetch-Dest": "document", 
+    "Sec-Fetch-Mode": "navigate", 
+    "Sec-Fetch-Site": "cross-site", 
+    "Sec-Fetch-User": "?1", 
+    "Upgrade-Insecure-Requests": "1", 
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+    "X-Amzn-Trace-Id": "Root=1-6367df2d-6d76214d6b5d8b0b589bb391"
+  }
+}
+
+If we send a GET request to the same URL, we get a completely different output...
+
+```{r}
+res2 <- GET("https://httpbin.org/headers")
+
+cat(content(res2, "text", encoding = "utf-8"))
+```
+
+Notice that the **User-Agent**, **Accept-Encoding**, and **Accept** are different from those sent by a request from an actual browser. A website can easily detect that this User-Agent belongs to a bot and block it. Let's try looking at the **headers** used when I access the rental listing from the **Chrome browser** and use that in the scrap.homegate() function to see if it manages to bypass the restrictions.
+
+To check the headers used when the request comes from an actual browser, **Right Click > Inspect > Network > Reload the page by pressing F5**. You want to check an item that has the same domain as the website we're trying to scrape. If you scroll down, you will find several items called **integrator.js?domain=www.homegate.ch**. Click on one of them and check the **Request Headers**. The result is shown below
+
+```
+"authority" = "adservice.google.com",
+"method" = "GET",
+"path" = "/adsid/integrator.js?domain=www.homegate.ch",
+"scheme" = "https",
+"accept" = "*/*",
+"accept-encoding" = "gzip, deflate, br",
+"accept-language" = "en-GB,en-US;q=0.9,en;q=0.8,de;q=0.7",
+"cookie" = "__Secure-3PSID=QAjUWf8s3-8ObZcfVeoYMw2GUZFxy4-EuhaixeMKa9r8Y2QRpxdj1nefy3R7qCVQDjVSUQ.; __Secure-3PAPISID=zyprGEHf3QT0pNvi/AsZUw246-p-ZUN4Wc; NID=511=huxmVz2gMiwY32nb_BTzc9krK6FoseDbrm2TKe9AmyEkXC-67Ga9CcUVxhg6lKeqJYSnRmqhcpxfPnCnfylHS4-V8DrTDgcq83GQEtu8AMmXnejxOAGpDCYloRLoj9YhMGNb4e7vdZRZV3Lm-kl8UrDfu0aML5LMgwe1-cXktrDsJfIWPN3c4-nvyvsw-Tg9bi8X9Qof5_4B3g0bGkS4lq35rG3KsBeqRbcdLp7TwY-evSErVCbsQWecQfmJaSJZX6a_aIWPR2QPUCod3DLmdykJCdvzNA4pwcofRx1stWsmEOv--8yXLP-Frj-IdcO1vhswm8VBomuj7rRjsp1dXznD19bjaN8kKSfdLrB6i0HksuCQN_ca8o-HdZmTKSiw4mDERBYbMReSNtwu; __Secure-3PSIDCC=AIKkIs1oZFY0-GEz8uJjkOhGTPoOJeN9MHcgXGjuLM_Hg2E098h9bDD4zH2PvyZ5rc9CXodTGXgy",
+"referer" = "https://www.homegate.ch/",
+"sec-ch-ua" = '"Google Chrome";v="107", "Chromium";v="107", "Not=A?Brand";v="24"',
+"sec-ch-ua-mobile" = "?0",
+"sec-ch-ua-platform" = "Windows",
+"sec-fetch-dest" = "script",
+"sec-fetch-mode" = "no-cors",
+"sec-fetch-site" = "cross-site",
+"user-agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+```
+As you can see, some of these headers are very similar to those returned by the **httpbin.org/headers** website. Let's try using some of them in the GET request
+
+```{r}
+headers = c(
+  "Accept" = "*/*",
+  "Accept-Encoding" = "gzip, deflate, br",
+  "Accept-Language" = "en-GB,en-US;q=0.9,en;q=0.8,de;q=0.7",
+  "Cookie" = "__Secure-3PAPISID=zyprGEHf3QT0pNvi/AsZUw246-p-ZUN4Wc", # I only used one Cookie out of the 4 because the other 3 are only used with http NOT https. Check the Cookies tab under "Network" for more details
+  "Referer" = "https://www.homegate.ch/",
+  "Sec-Ch-Ua" = "\"Google Chrome\";v=\"107\", \"Chromium\";v=\"107\", \"Not=A?Brand\";v=\"24\"",
+  "Sec-Ch-Ua-Mobile" = "?0",
+  "Sec-Ch-Ua-Platform" = "Windows", 
+  "Sec-Fetch-Dest" = "script", 
+  "Sec-Fetch-Mode" = "no-cors",
+  "Sec-Fetch-Site" = "cross-site",
+  "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36"
+)
+
+res4 <- GET(myurl, httr::add_headers(.headers = headers))
+cat(content(res4, "text", encoding = "utf-8"))
+```
+
+We are still getting the same error message, likely because the request does not have Javascript rendering capabilities. It's time to resort to another solution. We can simulate an actual browser session using **RSelenium**. This will overcome the anti-bot mechanisms set by the website and enable us to scrape the website
+
+# Step 4: Use RSelenium to scrape the website
+
+```{r}
+# Step 4.1: Load the RSelenium library and three other supporting libraries
+pacman::p_load(RSelenium, binman, wdman, netstat)
+
+# Step 4.2: Do four necessary steps before starting to use RSelenium **for the first time** according to this Stackoverflow
+# https://stackoverflow.com/questions/46202062/i-got-error-like-error-in-if-file-accessphantompath-1-0-argument-is-o
+
+# Step 4.2.1: Download the zip file from here according to your operating system --> http://phantomjs.org/download.html
+# Step 4.2.2: Create this directory C:\Users\{Username}\AppData\Local/binman/binman_phantomjs. You will need to create two empty folders, "binman" and "binman_phantomjs"
+# Step 4.2.3: Unzip the file, copy the executable in the "bin" file and paste it into the directory you created in step 4.2.2
+# Step 4.2.4: Run the following two command (ONLY in the first time you use RSelenium). After the first time, you don't need to run them anymore
+
+binman::rm_platform("phantomjs")
+wdman::selenium(retcommand = TRUE)
+```
+
+After setting up RSelenium on your laptop, create the function that simulates a human browsing the web through a normal browser
+
+```{r}
+# Step 4.2: Create a function that measures tha amount of time it takes the website to respond to a "GET" request
+response_time_get <- function(webpage) {
+  
+  # While scraping, we want to slow down requests to allow the page to fully load
+  # Since it is difficult to determine how long a page takes to load in an automated scrape, we use the solution outlined below
+  t0 <- Sys.time()
+  response <- httr::GET(webpage) # Send a request to the website
+  t1 <- Sys.time()
+  response_delay <- as.numeric(t1-t0) # Measure how long the website took to respond back to us
+  
+  return(response_delay) # This will be used in the next function
+}
+
+# Step 4.3: Create a function that gets the HTML code of a webpage through RSelenium
+navigate_selenium_func <- function(browser_var, webpage){
+  # Use RSelenium to open a blank new firefox browser according to this website 
+  # http://joshuamccrain.com/tutorials/web_scraping_R_selenium.html
+  rD <- rsDriver(browser = browser_var, port = netstat::free_port(), verbose = FALSE, check = TRUE)
+  remDr <- rD[["client"]]
+  
+  # Navigate to the required page of interest
+  remDr$navigate(webpage)
+  
+  # Calculate the response delay, which will be used in the "sleep" function below
+  response_delay <- response_time_get(webpage)
+  
+  # Give the page some time to fully load --> 10 times longer than response_delay to be safe
+  Sys.sleep(max(2.5,10 * response_delay))
+  
+  # Save the HTML file to an object
+  html <- remDr$getPageSource()[[1]]
+  
+  # Store the html code into a variable
+  page <- read_html(html)
+  
+  # Close the browser and delete the rD variable so that you can re-use the port
+  remDr$close()
+  rD$server$stop()
+  rm(rD, remDr)
+  gc()
+  system("taskkill /im java.exe /f", intern=FALSE, ignore.stdout=FALSE) # Kill the Java process behind RSelenium
+  
+  # Return the result (i.e. the HTML code)
+  return(page)
+}
+```
+
+
+```{r}
+page <- navigate_selenium_func("firefox", "https://www.homegate.ch/mieten/3002180672")
+# After you run this command, you should see a web browser popping up and the page you wanted to scrape will be displayed. The process will terminate after a few seconds and the variable "page" will contain the HTML code that can be scrapped
+
+page
+```
+
+# Step 5: Scrape the address from the page to test that the page has been rendered.
+
+```{r}
+# Testing
+anschrift <- page %>%
+  html_nodes(css = "address.AddressDetails_address_3Uq1m") %>%
+  html_text()
+
+anschrift
+```
+Great. The address has been successfully returned. Now, we can replicate the Professor's code
+
+# Step 6: Crawl the same fields like the professor
+
+```{r}
+#######################
+#eröffne leere Vektoren
+#######################
+miete <- c(NA)
+flaeche <- c(NA)
+zimmer <- c(NA)
+adr <- c(NA)
+nettomiete <- c(NA)
+nebenkosten <- c(NA)
+objekt <- c(NA)          
+zimmer2 <- c(NA)         
+etage <- c(NA)         
+flaeche2 <- c(NA)  
+renovjahr <- c(NA)      
+baujahr <- c(NA)
+allemerkmale <- c(NA)
+allebeschreibung <- c(NA)
+
+####################
+#Scrap Position Top 
+#################### 
+
+top <- page %>% 
+  html_elements(css="ul.SpotlightAttributes_spotlight_37lw3") %>%
+  html_text2() %>%
+  stringr::str_split("\\n") %>%
+  unlist()
+
+index <- which(top=="Miete")
+if (length(index) > 0) {
+  m <- top[index + 1]
+  # alles was Zahl oder . ist extrahieren, oder operator ist |
+  m <- str_extract_all(m,"\\d|\\.")[[1]] %>% str_c(., collapse='')
+  miete <- c(miete, as.numeric(m))
+} else {
+  miete<-c(miete, NA)
+}
+
+index <- which(top == "Zimmer")
+if (length(index) > 0) {
+  z <- top[index+1]
+  zimmer <- c(zimmer, as.numeric(z))
+} else {
+  zimmer <- c(zimmer, NA)
+}
+
+index <- which(top == "Fläche")
+if (length(index) > 0) {
+  f <- top[index + 1]
+  f <- str_replace_all(f, "m2", "")
+  flaeche <- c(flaeche, as.numeric(f))
+} else {
+  flaeche <- c(flaeche, NA)
+}
+
+########################
+#Scrap Position ADRESSE 
+########################
+
+myadr <- page %>%
+  html_nodes(css = 'address.AddressDetails_address_3Uq1m') %>%
+  html_text()
+
+if (length(myadr) > 0) {
+  adr<-c(adr, myadr)
+} else {
+  adr <- c(adr, NA)
+}
+
+########################
+#Scrap Position KOSTEN 
+########################
+
+kosten <- page %>% 
+  html_nodes(xpath = '/html/body/div[1]/main/div/div[2]/div[1]/div[1]/div[1]/div[3]/section[1]/div[4]/div[1]') %>% 
+  html_text2() %>%
+  str_split("\\n") %>%
+  unlist()
+
+index <- which(kosten == "Nettomiete:")
+if (length(index) > 0) {
+  nm <- kosten[index + 1]
+  # alles was Zahl oder . ist extrahieren, oder operator ist |
+  nm <- str_extract_all(nm, "\\d|\\.")[[1]] %>% str_c(., collapse='')
+  nettomiete <- c(nettomiete, as.numeric(nm))
+} else {
+  nettomiete <- c(nettomiete, NA)
+}
+
+index <- which(kosten == "Nebenkosten:")
+if (length(index) > 0) {
+  nk <- kosten[index+1]
+  # alles was Zahl oder . ist extrahieren, oder operator ist |
+  nk <- str_extract_all(nk, "\\d|\\.")[[1]] %>% str_c(., collapse='')
+  nebenkosten <- c(nebenkosten, as.numeric(nk))
+} else {
+  nebenkosten <- c(nebenkosten, NA)
+}
+
+#########################
+#Scrap Position ECKDATEN 
+#########################
+
+eckdaten <- page %>% 
+  html_nodes(css = 'div.CoreAttributes_coreAttributes_2UrTf') %>% 
+  html_text2() %>%
+  str_split("\\n") %>%
+  unlist()
+
+index <- which(eckdaten == "Objekttyp:")
+if (length(index) > 0) {
+  objekt <- c(objekt, eckdaten[index + 1])
+} else {
+  objekt <- c(objekt, NA)
+}
+
+index <- which(eckdaten == "Anzahl Zimmer:")
+if(length(index) > 0) {
+  zimmer2 <- c(zimmer2, as.numeric(eckdaten[index + 1]))
+} else {
+  zimmer2 <- c(zimmer2, NA)
+}
+
+index <- which(eckdaten == "Etage:")
+if (length(index > 0)) {
+  etage <- c(etage, eckdaten[index + 1])
+} else {
+  etage <- c(etage, NA)
+}
+
+index <- which(eckdaten == "Wohnfläche:")
+if (length(index) > 0) {
+  flaeche2 <- c(flaeche2, as.numeric(str_replace_all(eckdaten[index + 1], "m2", "")))
+} else {
+  flaeche2 <- c(flaeche2, NA)
+}
+
+index <- which(eckdaten == "Letztes Renovationsjahr:")
+if(length(index) > 0) {
+  renovjahr <- c(renovjahr, as.numeric(eckdaten[index + 1]))
+} else {
+  renovjahr <- c(renovjahr, NA)
+}
+
+index <- which(eckdaten == "Baujahr:")
+if(length(index) > 0) {
+  baujahr <- c(baujahr, as.numeric(eckdaten[index + 1]))
+} else {
+  baujahr <- c(baujahr, NA)
+}
+
+##########################################
+#Scrap Position MERKMALE u. BESCHREIBUNG 
+##########################################
+
+merkmale <- page %>%
+  html_elements(css = "ul.FeaturesFurnishings_list_1HzQj") %>%
+  html_text2()
+
+if (length(merkmale) > 0) {
+  allemerkmale <- c(allemerkmale, merkmale)
+} else {
+  allemerkmale <- c(allemerkmale, NA)
+}
+
+beschreibung <- page %>%
+  html_elements(css = "div.Description_descriptionBody_2wGwE") %>%
+  html_text2()
+
+if (length(beschreibung) > 0) {
+  allebeschreibung <- c(allebeschreibung, beschreibung)
+} else {
+  allebeschreibung <- c(allebeschreibung, NA)
+}
+
+df_result <- data.frame(
+  plz = 9050, miete=miete, flaeche=flaeche, zimmer=zimmer, adr=adr, nettomiete=nettomiete, nebenkosten=nebenkosten,
+  objekt=objekt, zimmer2=zimmer2, etage=etage, flaeche2=flaeche2, renovjahr=renovjahr, baujahr=baujahr,
+  allemerkmale=allemerkmale, allebeschreibung=allebeschreibung
+)
+
+# Display df_result
+df_result <- df_result[!duplicated(df_result), ][2, ]
+```
+
+**Recommendation:**
+Even though this method worked out fine, large scale scraping requires the use of **professional Proxy services** that can **rotate proxies and user agents**, **detect bans**, **solve CAPTCHAs**, **manage geo-targeting**, and **render Javascript**. These proxy services are more common with Python. If you are interested in knowing more about this domain, which service to use, and how to write scripts to crawl the web with no restrictions, I would be happy to support :)

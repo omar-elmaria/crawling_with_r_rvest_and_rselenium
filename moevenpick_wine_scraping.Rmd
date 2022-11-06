@@ -17,18 +17,12 @@ if (system.file(package = "pacman") == "") {
   install.packages("pacman")
 }
 
-pacman::p_load(rvest, httr, dplyr, stringr, purrr)
+pacman::p_load(rvest, httr, dplyr, stringr)
 ```
 
-# Step 2: Create a function to throttle the requests to the server so that we do not get blocked
+# Step 2: Scrape the website using the rvest package
 
-```{r echo=FALSE}
-throttled_get <- slowly(~ read_html(.), rate = rate_delay(3)) # Throttle the read_html function using a delay of 3 seconds between each request and the next one
-```
-
-# Step 3: Scrape the website using the rvest package
-
-The URL `https://www.moevenpick-wein.com/de/rotweine` returns 2186 results. There are 24 results on a page, which means there are ~ 92 pages to scrape. The website is **paginated** `https://www.moevenpick-wein.com/de/rotweine{?p=1}`, meaning we can create a **for** loop to scrape the results from each page.
+The URL `https://www.moevenpick-wein.com/de/rotweine` returns 2177 results. There are 24 results on a page, which means there are ~ 91 pages to scrape. The website is **paginated** `https://www.moevenpick-wein.com/de/rotweine?p=1`, meaning we can create a **for** loop to scrape the results from each page.
 
 To test out our scraper, let's define a function to send a GET request to a webpage and fetch its html content. In the function, we will also define the **CSS/XPATH selectors** of the data we want to crawl.
 
@@ -44,100 +38,157 @@ The data points we will crawl are:
 - image_url
 
 ```{r}
-url_template = "https://www.moevenpick-wein.com/de/rotweine?p=1"
-page <- read_html(url_template)
+# Define the template URL that will be used in the scraping function
+url_template = "https://www.moevenpick-wein.com/de/rotweine?p=" # After the "=" sign, you can put the page number (i.e., 1, 2, 3) to get redirected to the designated page
 
-# Data to be crawled
+# Define the scraping function
+scrape_func <- function(url, seite) {
+  # Step 1: Read the HTML content from the URL
+  page <- read_html(url)
 
-# 1. product_title
-product_title <- page %>% 
-  html_nodes(css = "span.product-name-1") %>% 
-  html_text(trim = TRUE)
-
-# 2. product_name
-# The product_name is split into two parts. Crawl them separately, then combine them into one variable
-product_name_p1 <- page %>% 
-  html_nodes(css = "p.product-name > span.product-name-part:first-child") %>% 
-  html_text(trim = TRUE)
-
-product_name_p2 <- page %>% 
-  html_nodes(css = "p.product-name > span.product-name-part:nth-child(2)") %>% 
-  html_text(trim = TRUE)
-
-# Now, combine the two parts together using the paste0 function
-product_name <- paste0(product_name_p1, " ", product_name_p2)
-
-# 3. product_url
-product_url <- page %>% 
-  html_nodes(css = "h2.product-name > a") %>% # Use a CSS or an XPATH selector here
-  html_attr("href") # ... then extract an attribute or the text. All the other crawled fields follow the same format
-
-# 4. rating_score
-# Raw rating score as a string. It could be out of 100 or out of 20
-rating_score_raw <- page %>%
-  html_nodes(css = "p.rating-score") %>%
-  html_text(trim = TRUE) %>% # trim = TRUE removes any carriage returns or unwanted white space
-  str_extract(string = ., pattern = "\\d+\\/\\d+") # This regex extracts any part of the string that matches this pattern "number/number"
-
-# Note 1: To try out regex patterns and see how they extract certain parts of a string, use this website --> https://regex101.com/
-# Note 2: The second page of this PDF (https://evoldyn.gitlab.io/evomics-2018/ref-sheets/R_strings.pdf) contains a handy cheat sheet for regex  
-# Note 3: In R, you need to escape any backslash with another backslash. This is not needed on the website, so the expression above would be "\d+\/\d+"
-
-# We can also calculate the rating as a **percentage**
-# To do that, we will need to extract the first and second parts of the rating score and divide them by each other
-
-# Extract the **first** part of the rating score
-rating_score_pct_p1 <- page %>% 
-  html_nodes(css = "p.rating-score") %>%
-  html_text(trim = TRUE) %>%
-  str_extract(string = ., pattern = "\\d+(?=\\/\\d+)") %>% # The regex here is --> extract any digit **before** a division sign "/" followed by numbers
-  as.integer(.) # Remember to convert the string to an integer
-
-# Extract the **second** part of the rating score
-rating_score_pct_p2 <- page %>% 
-  html_nodes(css = "p.rating-score") %>%
-  html_text(trim = TRUE) %>%
-  str_extract(string = ., pattern = "(?<=\\/)\\d+") %>% # The regex here is --> extract any digit **after** the division sign
-  as.integer(.)
-
-# Now, combine both parts to calculate a percentage
-rating_score_pct <- round(rating_score_pct_p1 / rating_score_pct_p2, 4)
-
-# 5. reviewer
-reviewer <- page %>%
-  html_nodes(css = "p.rating-score") %>%
-  html_text(trim = TRUE) %>%
-  str_extract(string = ., pattern = "[a-zA-Z]+") # This regex extracts any characters from A-Z in the string (lowercase or uppercase)
-
-# 6. country
-country <- page %>%
-  html_nodes(css = "p.cellar-name") %>%
-  html_text(trim = TRUE) %>%
-  str_extract(string = ., pattern = "\\w+(?=\\s\\|)") # This regex extracts any word characters **before** " |"
-
-# 7. city
-city <- page %>%
-  html_nodes(css = "p.cellar-name") %>%
-  html_text(trim = TRUE) %>%
-  str_extract(string = ., pattern = "(?<=\\|\\s)\\w+") # This regex extracts any word characters **after** "| "
-
-# 8. price
-price <- page %>%
-  html_nodes(css = "span.price") %>%
-  html_text(trim = TRUE) %>%
-  str_extract(string = ., pattern = "(?<=CHF\\s).*") %>% # This regex extracts any alphanumeric character **after** (CHF )
-  as.numeric(.)
-
-# Sometimes, a price of "zero" is crawled. Remove it from the vector
-price <- price[price != 0]
-
-# 9. image_url
-image_url <- page %>%
-  html_nodes(css = "img.product-image-photo") %>%
-  html_attr("src")
-
-# Dump the crawled data into a data frame so that it can be cleaned and formatted
-df <- data.frame(product_title, product_name, product_url, rating_score_raw, rating_score_pct, reviewer, price, image_url)
+  # Step 2: Crawl the data
+  
+  # 2.1. product_title
+  product_title <- page %>% 
+    html_nodes(css = "span.product-name-1") %>% 
+    html_text(trim = TRUE)
+  
+  # 2.2. product_name
+  # The product_name is split into two parts. Crawl them separately, then combine them into one variable
+  product_name_p1 <- page %>% 
+    html_nodes(css = "p.product-name > span.product-name-part:first-child") %>% 
+    html_text(trim = TRUE)
+  
+  product_name_p2 <- page %>% 
+    html_nodes(css = "p.product-name > span.product-name-part:nth-child(2)") %>% 
+    html_text(trim = TRUE)
+  
+  # Now, combine the two parts together using the paste0 function
+  product_name <- paste0(product_name_p1, " ", product_name_p2)
+  
+  # 2.3. product_url
+  product_url <- page %>% 
+    html_nodes(css = "h2.product-name > a") %>% # Use a CSS or an XPATH selector here
+    html_attr("href") # ... then extract an attribute or the text. All the other crawled fields follow the same format
+  
+  # 2.4. rating_score
+  # Raw rating score as a string. It could be out of 100 or out of 20
+  rating_score_raw <- page %>%
+    html_nodes(css = "p.rating-score") %>%
+    html_text(trim = TRUE) %>% # trim = TRUE removes any carriage returns or unwanted white space
+    str_extract(string = ., pattern = "\\d+\\/\\d+") # This regex extracts any part of the string that matches this pattern "number/number"
+  
+  # Note 1: To try out regex patterns and see how they extract certain parts of a string, use this website --> https://regex101.com/
+  # Note 2: The second page of this PDF (https://evoldyn.gitlab.io/evomics-2018/ref-sheets/R_strings.pdf) contains a handy cheat sheet for regex  
+  # Note 3: In R, you need to escape any backslash with another backslash. This is not needed on the website, so the expression above would be "\d+\/\d+"
+  
+  # We can also calculate the rating as a **percentage**
+  # To do that, we will need to extract the first and second parts of the rating score and divide them by each other
+  
+  # Extract the **first** part of the rating score
+  rating_score_pct_p1 <- page %>% 
+    html_nodes(css = "p.rating-score") %>%
+    html_text(trim = TRUE) %>%
+    str_extract(string = ., pattern = "\\d+(?=\\/\\d+)") %>% # The regex here is --> extract any digit **before** a division sign "/" followed by numbers
+    as.integer(.) # Remember to convert the string to an integer
+  
+  # Extract the **second** part of the rating score
+  rating_score_pct_p2 <- page %>% 
+    html_nodes(css = "p.rating-score") %>%
+    html_text(trim = TRUE) %>%
+    str_extract(string = ., pattern = "(?<=\\/)\\d+") %>% # The regex here is --> extract any digit **after** the division sign
+    as.integer(.)
+  
+  # Now, combine both parts to calculate a percentage
+  rating_score_pct <- round(rating_score_pct_p1 / rating_score_pct_p2, 4)
+  
+  # 2.5. reviewer
+  reviewer <- page %>%
+    html_nodes(css = "p.rating-score") %>%
+    html_text(trim = TRUE) %>%
+    str_extract(string = ., pattern = "[a-zA-Z]+") # This regex extracts any characters from A-Z in the string (lowercase or uppercase)
+  
+  # 2.6. country
+  country <- page %>%
+    html_nodes(css = "p.cellar-name") %>%
+    html_text(trim = TRUE) %>%
+    str_extract(string = ., pattern = "\\w+(?=\\s\\|)") # This regex extracts any word characters **before** " |"
+  
+  # 2.7. city
+  city <- page %>%
+    html_nodes(css = "p.cellar-name") %>%
+    html_text(trim = TRUE) %>%
+    str_extract(string = ., pattern = "(?<=\\|\\s)\\w+") # This regex extracts any word characters **after** "| "
+  
+  # 2.8. price
+  price <- page %>%
+    html_nodes(xpath = "//span[@data-price-type = 'finalPrice']/span") %>%
+    html_text(trim = TRUE) %>%
+    str_extract(string = ., pattern = "(?<=CHF\\s).*") %>% # This regex extracts any alphanumeric character **after** (CHF )
+    str_replace(., "'", "") %>% # Some numbers are displayed with an apostrophe (e.g., 1'150.00). We need to remove it to convert "price" to a number
+    as.numeric(.)
+  
+  # Sometimes, a price of "zero" is crawled. Remove it from the vector
+  price <- price[price != 0]
+  
+  # 2.9. image_url
+  image_url <- page %>%
+    html_nodes(css = "img.product-image-photo") %>%
+    html_attr("src")
+  
+  # Dump the crawled data into a data frame so that it can be cleaned and formatted
+  df_staging <- data.frame(seite, product_title, product_name, product_url, rating_score_raw, rating_score_pct, reviewer, country, city, price, image_url)
+  df <- rbind(df, df_staging)
+  
+  return(df)
+}
 ```
 
+# Step 3: Create a function that outputs random time values
+
+```{r echo=FALSE}
+random_delay_func <- function(min, max) {
+  return(round(sample(x = min:max, size = 1, replace = TRUE) - runif(1), 1))
+}
+```
+
+# Step 4: Loop over the URLs via a for loop
+
+```{r echo=FALSE}
+# Create an empty data frame that will contain the crawled data
+df <- data.frame()
+
+# Get the last page on the website to use it as the end of the range in the for loop
+last_page <- read_html(paste0(url_template, 1)) %>%
+  html_nodes(css = "div.filter-results-count > strong") %>%
+  html_text(trim = TRUE) %>%
+  as.integer(.)
+
+last_page = ceiling(last_page / 24) # There are 24 items on every page. We round up to reach the last page number we need to scrape
+
+# Run the for loop on every page
+for (i in 1:last_page) {
+  # Print Sys.time
+  print(paste0("The starting time of iteration ", i, " is: ", Sys.time()))
+  
+  # Execute the scrapping function
+  df <- scrape_func(url = paste0(url_template, i), seite = i)
+  
+  # Print a success message
+  print(paste0("Page ", i, " was scrapped successfully"))
+  
+  # Throttle scrape_func using a randomized delay between each request and the next one so that we do not get blocked
+  Sys.sleep(time = random_delay_func(2,4))
+}
+```
+# Bonus part: Construct a price histogram for each country
+
+```{r}
+library(ggplot2)
+ggplot2::ggplot(data = df, aes(x = price, fill = country), alpha = 0.4) +
+  geom_histogram() +
+  facet_wrap(~ country) +
+  xlim(0,1000) +
+  labs(title = "Price Histogram Per Country", subtitle = "The X-axis is limited to 1000 CHF to eliminate outliers and produce a better visual")
+```
 

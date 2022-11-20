@@ -42,7 +42,8 @@ The CSS/XPath selectors of the nine data points are as follows:
   - **Part 2** is the score out of 100 or 20
   - In the example below, the person who reviewed the wine is "Tim Atkin". He gave the bottle a score of 98/100
   - Since the score can be out of 100 or 20, we crawl the raw score in **string format** and also the individual components to calculate a percentage (e.g., 98/100 = 0.98 or 15/20 = 0.75)
-  ![image](https://user-images.githubusercontent.com/98691360/202925787-667e831d-35df-4cdd-a8fa-fe46e6f21a97.png)
+  
+  ![image](https://user-images.githubusercontent.com/98691360/202926510-db9154a0-1f40-4d71-b3a8-47bcee6f003f.png)
   - The CSS selector of the **composite review (reviewer + score)** is `p.rating-score` --> `p` with class `rating-score`
   - **Part one** can be extracted using this regex --> `[a-zA-Z]+`. This regex extracts any characters from A-Z in the string (lowercase or uppercase)
   - **Part two** as a whole can be extracted using this regex --> `\\d+\\/\\d+`. This regex extracts any part of the string that matches this pattern **number/number**
@@ -54,8 +55,7 @@ The CSS/XPath selectors of the nine data points are as follows:
   - `p.cellar-name` is the CSS selector of this composite string --> `p` of class `cellar-name`
   - To extract the **country**, one can use this regex --> `\\w+(?=\\s\\|)`. It extracts any word characters **before** " |"
   - To extract the **city**, one can use this regex --> `(?<=\\|\\s)\\w+`. It extracts any word characters **after** "| "
-
-- price
+- **price**
   - The XPATH selector of price is `//span[@data-price-type = 'finalPrice']/span` --> `span` with attribute `data-price-type = 'finalPrice'` AND a `span` child
 price is displayed as a composite string with the currency symbol (e.g., CHF 950.00)
   - In addition, wines that have 4-digit prices are displayed with an **apostrophe** (e.g., CHF 1,150.00)

@@ -72,7 +72,7 @@ After extracting these data points, we can place them in a data frame using the 
 ## 1.4. Throttling Our GET Requests
 To **stay polite** to the server, we need to throttle our GET requests to prevent our scraper from getting blocked. We can create a function to produce **random time values** and use the `Sys.sleep()` function to **slow down the scraper** in a random fashion. In code form, this looks something like this…
 
-![image](https://user-images.githubusercontent.com/98691360/202926270-3193fe62-7328-4c2b-8674-3543caaf2dbf.png)
+![image](https://user-images.githubusercontent.com/98691360/202926552-58e4cb95-cb2a-4ba2-84f6-173cdd04bd2b.png)
 
 ## 1.5. Further Automating the Scraper
 To fully automate the scraper, we can extract the **last page number** from the first page and set it as the end of the "for" loop’s range. The first page does not display the last page number, but rather the **total number of products**, as shown below.

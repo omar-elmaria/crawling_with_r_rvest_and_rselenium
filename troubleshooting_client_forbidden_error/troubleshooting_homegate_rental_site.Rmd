@@ -25,7 +25,7 @@ The `scrap.homegate` function fails whenever we try scrapping one of the individ
 
 ```{r}
 # Try out the scrap.homegate function on "https://www.homegate.ch/mieten/3002180672"
-link <- "/mieten/3002180672"
+link <- "/mieten/3002032611"
 myurl <- paste("https://www.homegate.ch", link, sep="")
 
 names1<-c("Urs","Fabienne","Fabian","Daniel","Simon","Simona","Andrea","Andreas","Martina",
@@ -161,7 +161,7 @@ wdman::selenium(retcommand = TRUE)
 After setting up RSelenium on your laptop, create the function that simulates a human browsing the web through a normal browser
 
 ```{r}
-# Step 4.2: Create a function that measures tha amount of time it takes the website to respond to a "GET" request
+# Step 4.2: Create a function that measures the amount of time it takes the website to respond to a "GET" request
 response_time_get <- function(webpage) {
   
   # While scraping, we want to slow down requests to allow the page to fully load
@@ -210,7 +210,7 @@ navigate_selenium_func <- function(browser_var, webpage){
 
 
 ```{r}
-page <- navigate_selenium_func("firefox", "https://www.homegate.ch/mieten/3002180672")
+page <- navigate_selenium_func("firefox", myurl)
 # After you run this command, you should see a web browser popping up and the page you wanted to scrape will be displayed. The process will terminate after a few seconds and the variable "page" will contain the HTML code that can be scrapped
 
 page
@@ -226,6 +226,7 @@ anschrift <- page %>%
 
 anschrift
 ```
+
 Great. The address has been successfully returned. Now, we can replicate the Professor's code
 
 # Step 6: Crawl the same fields like the professor
@@ -301,7 +302,7 @@ if (length(myadr) > 0) {
 }
 
 ########################
-#Scrap Position KOSTEN 
+#Scrap Position KOSTEN
 ########################
 
 kosten <- page %>% 
@@ -329,6 +330,28 @@ if (length(index) > 0) {
 } else {
   nebenkosten <- c(nebenkosten, NA)
 }
+
+#########################
+#BONUS PART (EASTER EGG)
+#########################
+
+# The professor's code does not accurately scrape the "Nettomiete" and "Nebenkoste", so I did it in my own way
+nettomiete_xpath = "//div[@data-test = 'costs']/dl/dt[text()='Nettomiete:']/following-sibling::dd[position()=1]/span/text()"
+nebenkosten_xpath = "//div[@data-test = 'costs']/dl/dt[text()='Nebenkosten:']/following-sibling::dd[position()=1]/span/text()"
+
+nettomiete <- page %>% 
+  html_nodes(xpath = nettomiete_xpath) %>%
+  html_text() %>%
+  str_extract_all(string = ., pattern = "\\d")
+
+nettomiete <- nettomiete[[1]] %>% str_c(., collapse = "") %>% as.numeric(.)
+
+nebenkosten <- page %>% 
+  html_nodes(xpath = nebenkosten_xpath) %>%
+  html_text() %>%
+  str_extract_all(string = ., pattern = "\\d")
+
+nebenkosten <- nebenkosten[[1]] %>% str_c(., collapse = "") %>% as.numeric(.)
 
 #########################
 #Scrap Position ECKDATEN 
@@ -414,7 +437,10 @@ df_result <- data.frame(
 
 # Display df_result
 df_result <- df_result[!duplicated(df_result), ][2, ]
+df_result
 ```
 
 **Recommendation:**
 Even though this method worked out fine, large scale scraping requires the use of **professional Proxy services** that can **rotate proxies and user agents**, **detect bans**, **solve CAPTCHAs**, **manage geo-targeting**, and **render Javascript**. These proxy services are more common with Python. If you are interested in knowing more about this domain, which service to use, and how to write scripts to crawl the web with no restrictions, I would be happy to support :)
+
+There are free methods you can use to scrape Javascript websites with Python (e.g., scrapy-splash and scrapy-playwright). These libraries can also be integrated with proxy services. In all cases, if you are planning to do large scale scraping (100s or 1000s of pages), you cannot rely on sending requests from a single IP. It doesn't matter which method you use. You'll be banned or slowed down unless you mask your identity. Again, these are all services that I specialize in and would be happy to support with if needed :)
